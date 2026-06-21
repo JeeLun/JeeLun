@@ -1,0 +1,1764 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>■ 像素文档阅读器 | CYBER READER v2</title>
+    <style>
+        :root {
+            --cyan: #65ebf6;
+            --pink: #e08282;
+            --green: #85ea8e;
+            --white: #ffffff;
+            --black: #061116;
+            --cyan-dim: #3a8f99;
+            --cyan-dark: #1a4a50;
+            --cyan-glow: rgba(101, 235, 246, 0.3);
+            --grid-color: rgba(100, 106, 107, 0.03);
+            --scanline-color: rgba(101, 235, 246, 0.012);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            background: var(--black);
+            font-family: 'Courier New', 'Consolas', 'DejaVu Sans Mono', 'Menlo', 'monospace';
+            color: var(--white);
+            overflow: hidden;
+            -webkit-font-smoothing: none;
+            -moz-osx-font-smoothing: unset;
+            text-rendering: optimizeSpeed;
+            cursor: crosshair;
+            user-select: none;
+            -webkit-user-select: none;
+            letter-spacing: 0.02em;
+            font-size: 13px;
+        }
+
+        /* 全局像素网格背景 */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            background-image:
+                linear-gradient(var(--grid-color) 1px, transparent 1px),
+                linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+            background-size: 8px 8px;
+            background-position: 0 0;
+        }
+
+        /* 扫描线 */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+            background: repeating-linear-gradient(0deg,
+                    transparent,
+                    transparent 2px,
+                    var(--scanline-color) 2px,
+                    var(--scanline-color) 4px);
+            animation: scanlineMove 8s linear infinite;
+        }
+
+        @keyframes scanlineMove {
+            0% {
+                background-position: 0 0;
+            }
+            100% {
+                background-position: 0 100px;
+            }
+        }
+
+        /* 主容器 */
+        .main-container {
+            position: relative;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            height: 100%;
+            padding: 10px;
+            gap: 8px;
+        }
+
+        /* ========== 顶部标题栏 ========== */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border: 2px solid var(--cyan);
+            padding: 8px 16px;
+            background: var(--black);
+            position: relative;
+            flex-shrink: 0;
+            min-height: 46px;
+            box-shadow:
+                3px 3px 0px 0px rgba(101, 235, 246, 0.2),
+                inset -1px -1px 0px 0px rgba(101, 235, 246, 0.06);
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            width: 8px;
+            height: 8px;
+            background: var(--cyan);
+            box-shadow: 0 0 6px var(--cyan);
+        }
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            right: -2px;
+            width: 8px;
+            height: 8px;
+            background: var(--cyan);
+            box-shadow: 0 0 6px var(--cyan);
+        }
+        .header-title {
+            font-family: 'Courier New', 'Consolas', monospace;
+            font-size: 0.95rem;
+            font-weight: bold;
+            color: var(--cyan);
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .header-title .bracket {
+            color: var(--pink);
+            font-size: 1.1rem;
+        }
+        .header-title .dot {
+            display: inline-block;
+            width: 5px;
+            height: 5px;
+            background: var(--green);
+            margin: 0 1px;
+            animation: dotPulse 1.5s step-end infinite;
+        }
+        .header-title .dot:nth-child(2) {
+            animation-delay: 0.3s;
+        }
+        .header-title .dot:nth-child(3) {
+            animation-delay: 0.6s;
+        }
+        @keyframes dotPulse {
+            0%,
+            100% {
+                opacity: 1;
+                box-shadow: 0 0 4px var(--green);
+            }
+            50% {
+                opacity: 0.2;
+                box-shadow: 0 0 1px var(--green);
+            }
+        }
+        .header-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.6rem;
+            color: var(--cyan-dim);
+            letter-spacing: 0.05em;
+        }
+        .header-status .status-block {
+            width: 7px;
+            height: 7px;
+            border: 2px solid var(--cyan);
+            background: transparent;
+            transition: background 0.15s step-end;
+        }
+        .header-status .status-block.active {
+            background: var(--green);
+            border-color: var(--green);
+            box-shadow: 0 0 7px var(--green);
+        }
+        .header-status .status-block.warning {
+            background: var(--pink);
+            border-color: var(--pink);
+            box-shadow: 0 0 7px var(--pink);
+        }
+        #clockDisplay {
+            color: var(--cyan);
+            font-size: 0.65rem;
+            letter-spacing: 0.06em;
+        }
+
+        /* ========== 主体区域 ========== */
+        .body-area {
+            display: flex;
+            flex: 1;
+            gap: 8px;
+            min-height: 0;
+        }
+
+        /* ========== 通用面板 ========== */
+        .panel {
+            border: 2px solid var(--cyan);
+            background: var(--black);
+            position: relative;
+            box-shadow:
+                3px 3px 0px 0px rgba(101, 235, 246, 0.15),
+                inset -1px -1px 0px 0px rgba(101, 235, 246, 0.04);
+        }
+        .panel-corner-tl,
+        .panel-corner-br {
+            position: absolute;
+            width: 7px;
+            height: 7px;
+            border: 2px solid var(--cyan);
+            pointer-events: none;
+            z-index: 2;
+        }
+        .panel-corner-tl {
+            top: -2px;
+            left: -2px;
+            border-right: none;
+            border-bottom: none;
+        }
+        .panel-corner-br {
+            bottom: -2px;
+            right: -2px;
+            border-left: none;
+            border-top: none;
+        }
+
+        /* ========== 左侧面板 - 文件树 ========== */
+        .sidebar {
+            width: 340px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-height: 0;
+        }
+        .tree-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+        }
+        .tree-header {
+            border-bottom: 2px solid var(--cyan);
+            padding: 7px 12px;
+            font-size: 0.6rem;
+            color: var(--cyan);
+            letter-spacing: 0.07em;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(101, 235, 246, 0.03);
+            justify-content: space-between;
+        }
+        .tree-header-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .tree-header .header-dot {
+            width: 5px;
+            height: 5px;
+            background: var(--cyan);
+            box-shadow: 0 0 4px var(--cyan);
+        }
+        .tree-header .root-name {
+            color: var(--white);
+            font-size: 0.6rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 140px;
+        }
+        .btn-open-folder {
+            font-family: 'Courier New', 'Consolas', monospace;
+            font-size: 0.55rem;
+            letter-spacing: 0.05em;
+            background: transparent;
+            color: var(--cyan);
+            border: 1px solid var(--cyan);
+            padding: 5px 10px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.1s step-end;
+            flex-shrink: 0;
+        }
+        .btn-open-folder:hover {
+            background: var(--cyan);
+            color: var(--black);
+            box-shadow: 0 0 10px var(--cyan-glow);
+        }
+        .btn-open-folder:active {
+            background: var(--pink);
+            border-color: var(--pink);
+            color: var(--black);
+        }
+        .tree-scroll {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: auto;
+            padding: 6px 0;
+        }
+        .tree-scroll::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+        .tree-scroll::-webkit-scrollbar-track {
+            background: var(--black);
+            border-left: 1px solid rgba(101, 235, 246, 0.15);
+        }
+        .tree-scroll::-webkit-scrollbar-thumb {
+            background: var(--cyan-dark);
+            border: 1px solid var(--cyan-dim);
+            border-radius: 0;
+        }
+        .tree-scroll::-webkit-scrollbar-thumb:hover {
+            background: var(--cyan-dim);
+        }
+        .tree-empty {
+            padding: 30px 16px;
+            text-align: center;
+            color: var(--cyan-dim);
+            font-size: 0.6rem;
+            letter-spacing: 0.05em;
+            line-height: 1.8;
+        }
+        .tree-empty .empty-icon-grid {
+            display: inline-grid;
+            grid-template-columns: repeat(5, 7px);
+            grid-template-rows: repeat(5, 7px);
+            gap: 2px;
+            margin-bottom: 14px;
+        }
+        .tree-empty .empty-icon-grid .esq {
+            width: 7px;
+            height: 7px;
+            border: 1px solid var(--cyan-dim);
+            background: transparent;
+        }
+        .tree-empty .empty-icon-grid .esq.on {
+            background: var(--cyan-dim);
+            border-color: var(--cyan-dim);
+        }
+
+        /* ========== 树节点 ========== */
+        .tree-node-wrapper {
+            position: relative;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .tree-node-row {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            padding: 3px 8px 3px 0;
+            min-height: 26px;
+            white-space: nowrap;
+            transition: background 0.08s step-end;
+            position: relative;
+        }
+        .tree-node-row:hover {
+            background: rgba(101, 235, 246, 0.05);
+        }
+        .tree-node-row.active-file {
+            background: rgba(101, 235, 246, 0.12);
+            border-left: 3px solid var(--cyan);
+            padding-left: 5px;
+        }
+        .tree-node-indent {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            position: relative;
+        }
+        .tree-node-toggle {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border: 1px solid var(--cyan-dim);
+            background: transparent;
+            color: var(--cyan);
+            font-size: 0.5rem;
+            font-family: 'Courier New', 'Consolas', monospace;
+            line-height: 1;
+            margin-right: 3px;
+            transition: all 0.08s step-end;
+            padding: 0;
+        }
+        .tree-node-toggle:hover {
+            border-color: var(--cyan);
+            box-shadow: 0 0 5px var(--cyan-glow);
+            background: rgba(101, 235, 246, 0.1);
+        }
+        .tree-node-toggle.folder-icon {
+            border-color: var(--cyan);
+            color: var(--cyan);
+        }
+        .tree-node-icon {
+            width: 10px;
+            height: 10px;
+            flex-shrink: 0;
+            margin-right: 6px;
+            border: 2px solid var(--white);
+            background: transparent;
+            transition: all 0.08s step-end;
+        }
+        .tree-node-icon.type-txt {
+            border-color: var(--white);
+            background: rgba(255, 255, 255, 0.12);
+        }
+        .tree-node-icon.type-docx {
+            border-color: var(--pink);
+            background: rgba(224, 130, 130, 0.18);
+        }
+        .tree-node-icon.type-pdf {
+            border-color: var(--green);
+            background: rgba(133, 234, 142, 0.18);
+        }
+        .tree-node-icon.type-folder {
+            border-color: var(--cyan);
+            background: rgba(101, 235, 246, 0.2);
+            box-shadow: 0 0 3px rgba(101, 235, 246, 0.3);
+        }
+        .tree-node-icon.type-unknown {
+            border-color: #444;
+            background: rgba(100, 100, 100, 0.1);
+        }
+        .tree-node-name {
+            font-size: 0.65rem;
+            letter-spacing: 0.03em;
+            color: var(--white);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+        }
+        .tree-node-name.folder-name {
+            color: var(--cyan);
+        }
+        .tree-node-tag {
+            font-size: 0.5rem;
+            padding: 1px 5px;
+            border: 1px solid;
+            letter-spacing: 0.05em;
+            flex-shrink: 0;
+            margin-left: 4px;
+        }
+        .tag-txt {
+            border-color: var(--white);
+            color: var(--white);
+        }
+        .tag-docx {
+            border-color: var(--pink);
+            color: var(--pink);
+        }
+        .tag-pdf {
+            border-color: var(--green);
+            color: var(--green);
+        }
+        .tree-children {
+            overflow: hidden;
+            transition: max-height 0.15s step-end;
+        }
+        .tree-children.collapsed {
+            display: none;
+        }
+        .tree-children.expanded {
+            display: block;
+        }
+
+        /* 树连接线 */
+        .tree-node-indent-line {
+            position: relative;
+            flex-shrink: 0;
+        }
+        .tree-connector-v {
+            position: absolute;
+            left: 8px;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background: var(--cyan-dim);
+            pointer-events: none;
+        }
+        .tree-connector-h {
+            display: inline-block;
+            width: 12px;
+            height: 1px;
+            background: var(--cyan-dim);
+            flex-shrink: 0;
+            margin-right: 2px;
+            position: relative;
+            top: 0;
+        }
+
+        /* ========== 右侧面板 - 文档视图 ========== */
+        .viewer-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            overflow: hidden;
+        }
+        .viewer-header {
+            border-bottom: 2px solid var(--cyan);
+            padding: 7px 12px;
+            font-size: 0.6rem;
+            color: var(--cyan);
+            letter-spacing: 0.07em;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(101, 235, 246, 0.03);
+        }
+        .viewer-header .path-indicator {
+            color: var(--cyan-dim);
+            font-size: 0.55rem;
+            letter-spacing: 0.04em;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+        }
+        .viewer-header .path-indicator .sep {
+            color: var(--pink);
+            margin: 0 3px;
+        }
+        .viewer-content {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: auto;
+            padding: 14px 18px;
+            position: relative;
+        }
+        .viewer-content::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .viewer-content::-webkit-scrollbar-track {
+            background: var(--black);
+            border: 1px solid rgba(101, 235, 246, 0.12);
+        }
+        .viewer-content::-webkit-scrollbar-thumb {
+            background: var(--cyan-dark);
+            border: 1px solid var(--cyan-dim);
+            border-radius: 0;
+        }
+        .viewer-content::-webkit-scrollbar-thumb:hover {
+            background: var(--cyan-dim);
+        }
+        .viewer-content::-webkit-scrollbar-corner {
+            background: var(--black);
+            border: 1px solid rgba(101, 235, 246, 0.12);
+        }
+
+        /* 纯文本文档样式 */
+        .doc-text {
+            font-family: 'Courier New', 'Consolas', 'DejaVu Sans Mono', monospace;
+            font-size: 0.72rem;
+            line-height: 1.75;
+            color: var(--white);
+            white-space: pre-wrap;
+            word-break: break-word;
+            letter-spacing: 0.03em;
+        }
+        .doc-text .line-row {
+            display: flex;
+            min-height: 1.75em;
+        }
+        .doc-text .line-row:hover {
+            background: rgba(101, 235, 246, 0.03);
+        }
+        .doc-text .line-number {
+            display: inline-block;
+            width: 38px;
+            text-align: right;
+            margin-right: 12px;
+            color: var(--cyan-dim);
+            font-size: 0.55rem;
+            letter-spacing: 0.04em;
+            flex-shrink: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .doc-text .line-content {
+            color: var(--white);
+            flex: 1;
+        }
+
+        /* DOCX富文本样式 */
+        .docx-html {
+            font-family: 'Courier New', 'Consolas', 'DejaVu Sans Mono', monospace;
+            font-size: 0.72rem;
+            line-height: 1.75;
+            color: var(--white);
+            letter-spacing: 0.03em;
+            word-break: break-word;
+        }
+        .docx-html h1 {
+            font-size: 1.2rem;
+            color: var(--cyan);
+            border-bottom: 2px solid var(--cyan);
+            padding-bottom: 4px;
+            margin: 16px 0 8px;
+            letter-spacing: 0.06em;
+            font-weight: bold;
+        }
+        .docx-html h2 {
+            font-size: 1rem;
+            color: var(--cyan);
+            border-left: 4px solid var(--cyan);
+            padding-left: 10px;
+            margin: 12px 0 6px;
+            letter-spacing: 0.05em;
+            font-weight: bold;
+        }
+        .docx-html h3 {
+            font-size: 0.85rem;
+            color: var(--cyan-dim);
+            margin: 10px 0 5px;
+            letter-spacing: 0.04em;
+            font-weight: bold;
+        }
+        .docx-html h4,
+        .docx-html h5,
+        .docx-html h6 {
+            font-size: 0.75rem;
+            color: var(--cyan-dim);
+            margin: 8px 0 4px;
+            font-weight: bold;
+        }
+        .docx-html strong,
+        .docx-html b {
+            font-weight: bold;
+            color: #ffffff;
+            text-shadow: 0 0 1px rgba(255, 255, 255, 0.4);
+            letter-spacing: 0.04em;
+            border-bottom: 1px solid rgba(101, 235, 246, 0.25);
+            padding-bottom: 1px;
+        }
+        .docx-html em,
+        .docx-html i {
+            font-style: italic;
+            color: var(--green);
+            letter-spacing: 0.04em;
+        }
+        .docx-html u {
+            text-decoration: underline;
+            text-decoration-color: var(--pink);
+            text-underline-offset: 3px;
+        }
+        .docx-html p {
+            margin: 4px 0;
+            min-height: 1.2em;
+        }
+        .docx-html ul,
+        .docx-html ol {
+            margin: 6px 0;
+            padding-left: 24px;
+        }
+        .docx-html ul {
+            list-style-type: square;
+            color: var(--cyan);
+        }
+        .docx-html ul li::marker {
+            color: var(--cyan);
+            font-size: 0.6rem;
+        }
+        .docx-html ol {
+            list-style-type: decimal;
+            color: var(--white);
+        }
+        .docx-html ol li::marker {
+            color: var(--pink);
+            font-weight: bold;
+        }
+        .docx-html li {
+            margin: 3px 0;
+            color: var(--white);
+        }
+        .docx-html table {
+            border-collapse: collapse;
+            margin: 10px 0;
+            width: 100%;
+            border: 1px solid var(--cyan-dim);
+        }
+        .docx-html table td,
+        .docx-html table th {
+            border: 1px solid var(--cyan-dark);
+            padding: 6px 10px;
+            font-size: 0.65rem;
+            color: var(--white);
+        }
+        .docx-html table th {
+            background: rgba(101, 235, 246, 0.08);
+            color: var(--cyan);
+            font-weight: bold;
+        }
+        .docx-html a {
+            color: var(--cyan);
+            text-decoration: underline;
+            text-underline-offset: 3px;
+            cursor: pointer;
+        }
+        .docx-html blockquote {
+            border-left: 3px solid var(--cyan);
+            padding-left: 12px;
+            margin: 8px 0;
+            color: var(--cyan-dim);
+            font-style: italic;
+        }
+        .docx-html code {
+            background: rgba(101, 235, 246, 0.08);
+            padding: 2px 5px;
+            border: 1px solid var(--cyan-dark);
+            font-family: 'Courier New', 'Consolas', monospace;
+        }
+        .docx-html pre {
+            background: rgba(101, 235, 246, 0.04);
+            border: 1px solid var(--cyan-dark);
+            padding: 10px;
+            overflow-x: auto;
+            font-family: 'Courier New', 'Consolas', monospace;
+            font-size: 0.65rem;
+        }
+        .docx-html img {
+            max-width: 100%;
+            border: 2px solid var(--cyan-dim);
+            image-rendering: pixelated;
+        }
+        .docx-html hr {
+            border: none;
+            border-top: 2px dashed var(--cyan-dim);
+            margin: 14px 0;
+        }
+
+        /* 占位符 */
+        .viewer-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            gap: 14px;
+            opacity: 0.45;
+        }
+        .viewer-placeholder .placeholder-grid {
+            display: grid;
+            grid-template-columns: repeat(8, 7px);
+            grid-template-rows: repeat(8, 7px);
+            gap: 3px;
+        }
+        .viewer-placeholder .placeholder-grid .psq {
+            width: 7px;
+            height: 7px;
+            border: 1px solid var(--cyan-dim);
+            background: transparent;
+        }
+        .viewer-placeholder .placeholder-grid .psq.on {
+            background: var(--cyan-dim);
+            border-color: var(--cyan-dim);
+        }
+        .viewer-placeholder .placeholder-text {
+            font-size: 0.65rem;
+            color: var(--cyan-dim);
+            letter-spacing: 0.05em;
+            text-align: center;
+            line-height: 1.7;
+        }
+
+        /* 加载状态 */
+        .loading-indicator {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 20px;
+        }
+        .loading-indicator .load-block {
+            width: 7px;
+            height: 7px;
+            border: 2px solid var(--cyan);
+            animation: loadBlink 0.6s step-end infinite;
+        }
+        .loading-indicator .load-block:nth-child(2) {
+            animation-delay: 0.15s;
+        }
+        .loading-indicator .load-block:nth-child(3) {
+            animation-delay: 0.3s;
+        }
+        .loading-indicator .load-block:nth-child(4) {
+            animation-delay: 0.45s;
+        }
+        @keyframes loadBlink {
+            0%,
+            100% {
+                background: transparent;
+                box-shadow: none;
+            }
+            50% {
+                background: var(--cyan);
+                box-shadow: 0 0 6px var(--cyan);
+            }
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .body-area {
+                flex-direction: column;
+            }
+            .sidebar {
+                width: 100%;
+                flex-shrink: 0;
+                max-height: 38%;
+            }
+            .tree-panel {
+                min-height: 120px;
+            }
+            .header-title {
+                font-size: 0.75rem;
+            }
+            .header-status {
+                font-size: 0.5rem;
+                gap: 5px;
+            }
+            .btn-open-folder {
+                font-size: 0.5rem;
+                padding: 4px 7px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="main-container">
+        <!-- 顶部标题栏 -->
+        <header class="header">
+            <div class="header-title">
+                <span class="bracket">[</span>
+                CYBER READER
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                <span class="bracket">]</span>
+            </div>
+            <div class="header-status">
+                <span>SYS</span>
+                <span class="status-block active" id="statusSys" title="系统就绪"></span>
+                <span>|</span>
+                <span>DOC</span>
+                <span class="status-block" id="statusDoc" title="文档状态"></span>
+                <span>|</span>
+                <span id="clockDisplay">00:00:00</span>
+            </div>
+        </header>
+
+        <!-- 主体 -->
+        <div class="body-area">
+            <!-- 左侧面板 - 文件树 -->
+            <aside class="sidebar">
+                <div class="panel tree-panel" id="treePanel">
+                    <div class="panel-corner-tl"></div>
+                    <div class="panel-corner-br"></div>
+                    <div class="tree-header">
+                        <div class="tree-header-left">
+                            <span class="header-dot"></span>
+                            <span>文件树</span>
+                            <span style="color:var(--pink);">::</span>
+                            <span class="root-name" id="rootNameDisplay">—</span>
+                        </div>
+                        <button class="btn-open-folder" id="btnOpenFolder" title="选择本地文件夹">
+                            [ 打开文件夹 ]
+                        </button>
+                    </div>
+                    <div class="tree-scroll" id="treeScroll">
+                        <div class="tree-empty" id="treeEmpty">
+                            <div class="empty-icon-grid">
+                                <span class="esq on"></span><span class="esq"></span><span class="esq on"></span><span class="esq"></span><span class="esq on"></span>
+                                <span class="esq"></span><span class="esq on"></span><span class="esq"></span><span class="esq on"></span><span class="esq"></span>
+                                <span class="esq on"></span><span class="esq"></span><span class="esq on"></span><span class="esq"></span><span class="esq on"></span>
+                                <span class="esq"></span><span class="esq on"></span><span class="esq"></span><span class="esq on"></span><span class="esq"></span>
+                                <span class="esq on"></span><span class="esq"></span><span class="esq on"></span><span class="esq"></span><span class="esq on"></span>
+                            </div>
+                            点击 [ 打开文件夹 ] 选择目录<br>
+                            或拖拽文件夹到此区域
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- 右侧文档显示 -->
+            <main class="panel viewer-panel" id="viewerPanel">
+                <div class="panel-corner-tl"></div>
+                <div class="panel-corner-br"></div>
+                <div class="viewer-header">
+                    <span>■</span> 文档视图
+                    <span style="color:var(--pink);">::</span>
+                    <span class="path-indicator" id="pathIndicator">/empty/—</span>
+                </div>
+                <div class="viewer-content" id="viewerContent">
+                    <div class="viewer-placeholder" id="viewerPlaceholder">
+                        <div class="placeholder-grid" id="placeholderGrid"></div>
+                        <div class="placeholder-text">
+                            等待文档载入...<br>
+                            <span style="font-size:0.5rem;opacity:0.55;">在左侧文件树中选择文件</span>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 隐藏的文件选择器（用于webkitdirectory回退） -->
+    <input type="file" id="hiddenFolderInput" webkitdirectory multiple style="display:none;position:absolute;top:-9999px;left:-9999px;">
+
+    <!-- PDF.js -->
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js">
+    </script>
+    <!-- Mammoth.js for DOCX -->
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js">
+    </script>
+
+    <script>
+        (function() {
+            // ============ 初始化 ============
+            if (typeof pdfjsLib !== 'undefined') {
+                pdfjsLib.GlobalWorkerOptions.workerSrc =
+                    'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+            }
+
+            // ============ DOM 元素 ============
+            const treeScroll = document.getElementById('treeScroll');
+            const treeEmpty = document.getElementById('treeEmpty');
+            const rootNameDisplay = document.getElementById('rootNameDisplay');
+            const viewerContent = document.getElementById('viewerContent');
+            const pathIndicator = document.getElementById('pathIndicator');
+            const statusDoc = document.getElementById('statusDoc');
+            const statusSys = document.getElementById('statusSys');
+            const clockDisplay = document.getElementById('clockDisplay');
+            const btnOpenFolder = document.getElementById('btnOpenFolder');
+            const hiddenFolderInput = document.getElementById('hiddenFolderInput');
+            const placeholderGrid = document.getElementById('placeholderGrid');
+            const treePanel = document.getElementById('treePanel');
+
+            // ============ 生成占位符网格 ============
+            function generatePlaceholderGridHTML() {
+                const pattern = [
+                    1, 0, 0, 1, 0, 1, 0, 0,
+                    0, 1, 0, 0, 1, 0, 1, 0,
+                    0, 0, 1, 0, 0, 0, 0, 1,
+                    1, 0, 0, 1, 0, 1, 0, 0,
+                    0, 1, 0, 0, 1, 0, 1, 0,
+                    0, 0, 1, 0, 0, 0, 0, 1,
+                    1, 0, 0, 1, 0, 1, 0, 0,
+                    0, 1, 0, 0, 1, 0, 1, 0,
+                ];
+                return pattern.map(v => `<span class="psq${v ? ' on' : ''}"></span>`).join('');
+            }
+            if (placeholderGrid) {
+                placeholderGrid.innerHTML = generatePlaceholderGridHTML();
+            }
+
+            // ============ 时钟 ============
+            function updateClock() {
+                const now = new Date();
+                clockDisplay.textContent =
+                    String(now.getHours()).padStart(2, '0') + ':' +
+                    String(now.getMinutes()).padStart(2, '0') + ':' +
+                    String(now.getSeconds()).padStart(2, '0');
+            }
+            setInterval(updateClock, 1000);
+            updateClock();
+
+            // ============ 状态管理 ============
+            let fileTreeRoot = null; // 树根节点
+            let activeFilePath = null; // 当前选中的文件路径
+            let fileContentCache = new Map(); // 路径 -> 内容缓存
+            let fileHandleMap = new Map(); // 路径 -> FileSystemFileHandle (FSA模式)
+            let fileObjMap = new Map(); // 路径 -> File对象 (webkitdirectory模式)
+            let modeFSA = false; // 是否使用File System Access API
+
+            // 支持的扩展名
+            const SUPPORTED_EXTS = ['txt', 'docx', 'pdf'];
+
+            function getFileExt(name) {
+                const dotIndex = name.lastIndexOf('.');
+                return dotIndex >= 0 ? name.substring(dotIndex + 1).toLowerCase() : '';
+            }
+
+            function isSupportedExt(name) {
+                return SUPPORTED_EXTS.includes(getFileExt(name));
+            }
+
+            // ============ 显示占位符 ============
+            function showPlaceholder() {
+                viewerContent.innerHTML = '';
+                const ph = document.createElement('div');
+                ph.className = 'viewer-placeholder';
+                ph.id = 'viewerPlaceholder';
+                ph.innerHTML = `
+                    <div class="placeholder-grid">${generatePlaceholderGridHTML()}</div>
+                    <div class="placeholder-text">
+                        等待文档载入...<br>
+                        <span style="font-size:0.5rem;opacity:0.55;">在左侧文件树中选择文件</span>
+                    </div>`;
+                viewerContent.appendChild(ph);
+                pathIndicator.textContent = '/empty/—';
+                statusDoc.classList.remove('active', 'warning');
+            }
+
+            function showLoading() {
+                viewerContent.innerHTML = `
+                    <div class="loading-indicator">
+                        <span style="color:var(--cyan);font-size:0.65rem;letter-spacing:0.06em;">处理中</span>
+                        <span class="load-block"></span><span class="load-block"></span>
+                        <span class="load-block"></span><span class="load-block"></span>
+                    </div>`;
+                statusDoc.classList.remove('active');
+                statusDoc.classList.add('warning');
+            }
+
+            // ============ 渲染纯文本 ============
+            function renderTextContent(text, filePath) {
+                viewerContent.innerHTML = '';
+                const docDiv = document.createElement('div');
+                docDiv.className = 'doc-text';
+                const lines = text.split('\n');
+                const totalLines = lines.length;
+                const lineNumWidth = Math.max(2, String(totalLines).length);
+
+                lines.forEach((line, index) => {
+                    const row = document.createElement('div');
+                    row.className = 'line-row';
+                    const numSpan = document.createElement('span');
+                    numSpan.className = 'line-number';
+                    numSpan.textContent = String(index + 1).padStart(lineNumWidth, ' ');
+                    const contentSpan = document.createElement('span');
+                    contentSpan.className = 'line-content';
+                    contentSpan.textContent = line || ' ';
+                    row.appendChild(numSpan);
+                    row.appendChild(contentSpan);
+                    docDiv.appendChild(row);
+                });
+                viewerContent.appendChild(docDiv);
+                viewerContent.scrollTop = 0;
+                pathIndicator.textContent = filePath || '/docs/—';
+                statusDoc.classList.add('active');
+                statusDoc.classList.remove('warning');
+            }
+
+            // ============ 渲染DOCX富文本 ============
+            function renderDocxHtml(htmlString, filePath) {
+                viewerContent.innerHTML = '';
+                const container = document.createElement('div');
+                container.className = 'docx-html';
+                // mammoth生成的HTML是安全的（无脚本）
+                container.innerHTML = htmlString;
+                viewerContent.appendChild(container);
+                viewerContent.scrollTop = 0;
+                pathIndicator.textContent = filePath || '/docs/—';
+                statusDoc.classList.add('active');
+                statusDoc.classList.remove('warning');
+            }
+
+            // ============ 读取文件内容 ============
+            async function getFileContent(node) {
+                const cacheKey = node.path;
+                if (fileContentCache.has(cacheKey)) {
+                    return fileContentCache.get(cacheKey);
+                }
+                let fileObj = null;
+                if (modeFSA && fileHandleMap.has(cacheKey)) {
+                    try {
+                        fileObj = await fileHandleMap.get(cacheKey).getFile();
+                    } catch (e) {
+                        throw new Error('无法访问文件（权限可能已过期）: ' + e.message);
+                    }
+                } else if (fileObjMap.has(cacheKey)) {
+                    fileObj = fileObjMap.get(cacheKey);
+                } else if (node._fileObj) {
+                    fileObj = node._fileObj;
+                }
+
+                if (!fileObj) {
+                    throw new Error('无法获取文件对象');
+                }
+                return fileObj;
+            }
+
+            async function parseAndDisplay(node) {
+                showLoading();
+                try {
+                    const fileObj = await getFileContent(node);
+                    const ext = node.ext;
+                    let content = null;
+                    let htmlContent = null;
+
+                    if (ext === 'txt') {
+                        content = await readTxtFile(fileObj);
+                        fileContentCache.set(node.path, { type: 'text', data: content });
+                        renderTextContent(content, node.path);
+                    } else if (ext === 'docx') {
+                        htmlContent = await readDocxFileHTML(fileObj);
+                        fileContentCache.set(node.path, { type: 'html', data: htmlContent });
+                        renderDocxHtml(htmlContent, node.path);
+                    } else if (ext === 'pdf') {
+                        content = await readPdfFile(fileObj);
+                        fileContentCache.set(node.path, { type: 'text', data: content });
+                        renderTextContent(content, node.path);
+                    } else {
+                        content = '[ 不支持的文件类型: .' + ext + ' ]';
+                        fileContentCache.set(node.path, { type: 'text', data: content });
+                        renderTextContent(content, node.path);
+                    }
+                } catch (err) {
+                    console.error('文件解析错误:', err);
+                    const errText = '[ 解析错误: ' + err.message + ' ]';
+                    fileContentCache.set(node.path, { type: 'text', data: errText });
+                    renderTextContent(errText, node.path);
+                    statusDoc.classList.add('warning');
+                    statusDoc.classList.remove('active');
+                }
+            }
+
+            function readTxtFile(fileObj) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = () => reject(new Error('TXT读取失败'));
+                    reader.readAsText(fileObj, 'UTF-8');
+                });
+            }
+
+            function readDocxFileHTML(fileObj) {
+                return new Promise((resolve, reject) => {
+                    if (typeof mammoth === 'undefined') {
+                        reject(new Error('Mammoth.js 未加载，请检查网络'));
+                        return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = async () => {
+                        try {
+                            const arrayBuffer = reader.result;
+                            const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
+                            resolve(result.value || '<p>(文档内容为空)</p>');
+                        } catch (e) {
+                            reject(new Error('DOCX解析失败: ' + e.message));
+                        }
+                    };
+                    reader.onerror = () => reject(new Error('DOCX文件读取失败'));
+                    reader.readAsArrayBuffer(fileObj);
+                });
+            }
+
+            function readPdfFile(fileObj) {
+                return new Promise((resolve, reject) => {
+                    if (typeof pdfjsLib === 'undefined') {
+                        reject(new Error('PDF.js 未加载，请检查网络'));
+                        return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = async () => {
+                        try {
+                            const arrayBuffer = reader.result;
+                            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                            const totalPages = pdf.numPages;
+                            const maxPages = Math.min(totalPages, 80);
+                            let fullText = '=== PDF文档 | 共 ' + totalPages + ' 页';
+                            if (totalPages > maxPages) fullText += ' | 显示前 ' + maxPages + ' 页';
+                            fullText += ' ===\n\n';
+                            for (let i = 1; i <= maxPages; i++) {
+                                const page = await pdf.getPage(i);
+                                const textContent = await page.getTextContent();
+                                const pageText = textContent.items
+                                    .map(item => item.str)
+                                    .join(' ')
+                                    .replace(/\s+/g, ' ')
+                                    .trim();
+                                fullText += '--- 第 ' + i + ' 页 ---\n' + pageText + '\n\n';
+                            }
+                            if (totalPages > maxPages) {
+                                fullText += '\n... (剩余 ' + (totalPages - maxPages) + ' 页未显示) ...\n';
+                            }
+                            resolve(fullText || '(PDF内容为空)');
+                        } catch (e) {
+                            reject(new Error('PDF解析失败: ' + e.message));
+                        }
+                    };
+                    reader.onerror = () => reject(new Error('PDF文件读取失败'));
+                    reader.readAsArrayBuffer(fileObj);
+                });
+            }
+
+            // ============ 选中文件 ============
+            function selectFileNode(node) {
+                activeFilePath = node.path;
+                updateTreeHighlight();
+                fileContentCache.delete(node.path); // 清除缓存以重新读取（确保最新）
+                parseAndDisplay(node);
+            }
+
+            function updateTreeHighlight() {
+                const allRows = treeScroll.querySelectorAll('.tree-node-row');
+                allRows.forEach(row => {
+                    row.classList.remove('active-file');
+                    if (row.dataset.path === activeFilePath) {
+                        row.classList.add('active-file');
+                    }
+                });
+            }
+
+            // ============ 构建树节点DOM ============
+            function buildTreeDOM(node, depth, parentPathForConnector) {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'tree-node-wrapper';
+                wrapper.dataset.path = node.path;
+
+                const row = document.createElement('div');
+                row.className = 'tree-node-row';
+                row.dataset.path = node.path;
+                row.style.paddingLeft = (depth * 16) + 'px';
+
+                if (node.type === 'directory') {
+                    // 文件夹节点
+                    const toggle = document.createElement('button');
+                    toggle.className = 'tree-node-toggle folder-icon';
+                    toggle.textContent = node.expanded ? '[-]' : '[+]';
+                    toggle.title = node.expanded ? '折叠' : '展开';
+                    toggle.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        node.expanded = !node.expanded;
+                        refreshTree();
+                    });
+
+                    const icon = document.createElement('span');
+                    icon.className = 'tree-node-icon type-folder';
+
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = 'tree-node-name folder-name';
+                    nameSpan.textContent = node.name;
+                    nameSpan.title = node.path;
+
+                    row.appendChild(toggle);
+                    row.appendChild(icon);
+                    row.appendChild(nameSpan);
+
+                    row.addEventListener('click', () => {
+                        node.expanded = !node.expanded;
+                        refreshTree();
+                    });
+
+                    wrapper.appendChild(row);
+
+                    // 子节点
+                    const childrenContainer = document.createElement('div');
+                    childrenContainer.className = 'tree-children ' + (node.expanded ? 'expanded' :
+                        'collapsed');
+                    if (node.children && node.children.length > 0) {
+                        node.children.forEach(child => {
+                            childrenContainer.appendChild(buildTreeDOM(child, depth + 1, node
+                                .path));
+                        });
+                    } else if (node.expanded) {
+                        const emptyMsg = document.createElement('div');
+                        emptyMsg.style.cssText =
+                            'padding:2px 0 2px ' + ((depth + 1) * 16 + 20) +
+                            'px;font-size:0.5rem;color:var(--cyan-dim);opacity:0.5;letter-spacing:0.04em;';
+                        emptyMsg.textContent = '(空文件夹)';
+                        childrenContainer.appendChild(emptyMsg);
+                    }
+                    wrapper.appendChild(childrenContainer);
+                } else {
+                    // 文件节点
+                    const spacer = document.createElement('span');
+                    spacer.style.cssText = 'width:16px;flex-shrink:0;';
+
+                    const ext = node.ext;
+                    const icon = document.createElement('span');
+                    icon.className = 'tree-node-icon type-' + (SUPPORTED_EXTS.includes(ext) ? ext : 'unknown');
+
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = 'tree-node-name';
+                    nameSpan.textContent = node.name;
+                    nameSpan.title = node.path;
+
+                    const tag = document.createElement('span');
+                    tag.className = 'tree-node-tag tag-' + (SUPPORTED_EXTS.includes(ext) ? ext : 'unknown');
+                    tag.textContent = ext.toUpperCase() || '?';
+
+                    row.appendChild(spacer);
+                    row.appendChild(icon);
+                    row.appendChild(nameSpan);
+                    row.appendChild(tag);
+
+                    if (SUPPORTED_EXTS.includes(ext)) {
+                        row.addEventListener('click', () => selectFileNode(node));
+                        row.style.cursor = 'pointer';
+                    } else {
+                        row.style.opacity = '0.4';
+                        row.style.cursor = 'default';
+                        row.title = '不支持的文件类型';
+                        row.addEventListener('click', () => {
+                            const errText = '[ 不支持的文件类型: .' + ext + ' ] - ' + node.path;
+                            renderTextContent(errText, node.path);
+                            activeFilePath = node.path;
+                            updateTreeHighlight();
+                        });
+                    }
+
+                    wrapper.appendChild(row);
+                }
+
+                // 高亮当前活动文件
+                if (node.path === activeFilePath && node.type === 'file') {
+                    row.classList.add('active-file');
+                }
+
+                return wrapper;
+            }
+
+            function refreshTree() {
+                treeScroll.innerHTML = '';
+                if (!fileTreeRoot) {
+                    treeScroll.appendChild(treeEmpty);
+                    treeEmpty.style.display = '';
+                    rootNameDisplay.textContent = '—';
+                    return;
+                }
+                treeEmpty.style.display = 'none';
+                rootNameDisplay.textContent = fileTreeRoot.name;
+                const rootDOM = buildTreeDOM(fileTreeRoot, 0, '');
+                treeScroll.appendChild(rootDOM);
+                updateTreeHighlight();
+                // 恢复活动文件的展开路径
+                if (activeFilePath) {
+                    expandPathToFile(fileTreeRoot, activeFilePath);
+                }
+            }
+
+            function expandPathToFile(node, targetPath) {
+                if (node.path === targetPath) return true;
+                if (node.type === 'directory' && node.children) {
+                    for (const child of node.children) {
+                        if (targetPath.startsWith(child.path + '/') || targetPath === child.path) {
+                            node.expanded = true;
+                            if (expandPathToFile(child, targetPath)) return true;
+                        }
+                    }
+                }
+                return false;
+            }
+
+            // ============ 排序子节点（文件夹在前，按名称排序） ============
+            function sortTreeChildren(node) {
+                if (node.children && node.children.length > 0) {
+                    node.children.sort((a, b) => {
+                        if (a.type !== b.type) {
+                            return a.type === 'directory' ? -1 : 1;
+                        }
+                        return a.name.localeCompare(b.name, 'zh-CN');
+                    });
+                    node.children.forEach(child => sortTreeChildren(child));
+                }
+            }
+
+            // ============ 从文件列表构建树（webkitdirectory模式） ============
+            function buildTreeFromFileList(files) {
+                const root = {
+                    name: 'root',
+                    path: '',
+                    type: 'directory',
+                    children: [],
+                    expanded: true,
+                };
+
+                for (const file of files) {
+                    const relativePath = file.webkitRelativePath || file.name;
+                    const parts = relativePath.replace(/\\/g, '/').split('/');
+                    let current = root;
+
+                    for (let i = 0; i < parts.length; i++) {
+                        const part = parts[i];
+                        const isLast = (i === parts.length - 1);
+                        const currentPath = parts.slice(0, i + 1).join('/');
+
+                        if (isLast) {
+                            const ext = getFileExt(part);
+                            const fileNode = {
+                                name: part,
+                                path: currentPath,
+                                type: 'file',
+                                ext: ext,
+                                _fileObj: file,
+                            };
+                            current.children.push(fileNode);
+                            fileObjMap.set(currentPath, file);
+                        } else {
+                            let dirNode = current.children.find(c => c.name === part && c.type ===
+                                'directory');
+                            if (!dirNode) {
+                                dirNode = {
+                                    name: part,
+                                    path: currentPath,
+                                    type: 'directory',
+                                    children: [],
+                                    expanded: false,
+                                };
+                                current.children.push(dirNode);
+                            }
+                            current = dirNode;
+                        }
+                    }
+                }
+                // 设置根目录名称
+                if (files.length > 0) {
+                    const firstPath = files[0].webkitRelativePath || files[0].name;
+                    const rootName = firstPath.split('/')[0] || '文件夹';
+                    root.name = rootName;
+                    root.path = rootName;
+                }
+                sortTreeChildren(root);
+                return root;
+            }
+
+            // ============ 递归读取目录（File System Access API） ============
+            async function readDirectoryFSA(dirHandle, currentPath, depth, maxDepth) {
+                if (depth > maxDepth) {
+                    return {
+                        name: dirHandle.name,
+                        path: currentPath,
+                        type: 'directory',
+                        children: [{ name: '...(深度限制)', path: currentPath + '/__limit__', type: 'file',
+                            ext: '', _fileObj: null }],
+                        expanded: false,
+                    };
+                }
+                const children = [];
+                try {
+                    for await (const [name, entry] of dirHandle.entries()) {
+                        const childPath = currentPath ? currentPath + '/' + name : name;
+                        if (entry.kind === 'directory') {
+                            const childDir = await readDirectoryFSA(entry, childPath, depth + 1, maxDepth);
+                            childDir.name = name;
+                            childDir.path = childPath;
+                            childDir.expanded = false;
+                            children.push(childDir);
+                        } else {
+                            const ext = getFileExt(name);
+                            children.push({
+                                name: name,
+                                path: childPath,
+                                type: 'file',
+                                ext: ext,
+                            });
+                            fileHandleMap.set(childPath, entry);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('读取目录失败:', currentPath, e);
+                }
+                return {
+                    name: dirHandle.name,
+                    path: currentPath,
+                    type: 'directory',
+                    children: children,
+                    expanded: true,
+                };
+            }
+
+            // ============ 加载文件夹（FSA模式） ============
+            async function loadFolderFSA(dirHandle) {
+                fileTreeRoot = await readDirectoryFSA(dirHandle, dirHandle.name, 0, 15);
+                fileTreeRoot.name = dirHandle.name;
+                fileTreeRoot.path = dirHandle.name;
+                fileTreeRoot.expanded = true;
+                sortTreeChildren(fileTreeRoot);
+                modeFSA = true;
+                fileObjMap.clear();
+                fileContentCache.clear();
+                activeFilePath = null;
+                refreshTree();
+                showPlaceholder();
+                rootNameDisplay.textContent = dirHandle.name;
+                statusSys.classList.add('active');
+                setTimeout(() => statusSys.classList.remove('active'), 400);
+            }
+
+            // ============ 加载文件夹（webkitdirectory模式） ============
+            function loadFolderFromInput(files) {
+                if (!files || files.length === 0) return;
+                fileTreeRoot = buildTreeFromFileList(files);
+                modeFSA = false;
+                fileHandleMap.clear();
+                fileContentCache.clear();
+                activeFilePath = null;
+                refreshTree();
+                showPlaceholder();
+                rootNameDisplay.textContent = fileTreeRoot.name;
+                statusSys.classList.add('active');
+                setTimeout(() => statusSys.classList.remove('active'), 400);
+            }
+
+            // ============ 按钮事件 - 打开文件夹 ============
+            btnOpenFolder.addEventListener('click', async () => {
+                // 优先使用File System Access API
+                if (typeof window.showDirectoryPicker === 'function') {
+                    try {
+                        const dirHandle = await window.showDirectoryPicker();
+                        await loadFolderFSA(dirHandle);
+                        return;
+                    } catch (err) {
+                        if (err.name === 'AbortError') {
+                            // 用户取消了
+                            return;
+                        }
+                        console.warn('File System Access API 失败，回退到 input方式:', err);
+                    }
+                }
+                // 回退到webkitdirectory
+                hiddenFolderInput.value = '';
+                hiddenFolderInput.click();
+            });
+
+            hiddenFolderInput.addEventListener('change', () => {
+                const files = hiddenFolderInput.files;
+                if (files && files.length > 0) {
+                    loadFolderFromInput(files);
+                }
+            });
+
+            // ============ 拖拽文件夹支持 ============
+            treePanel.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                treePanel.style.borderColor = 'var(--green)';
+                treePanel.style.boxShadow = '3px 3px 0px 0px rgba(133,234,142,0.35), inset 0px 0px 30px 0px rgba(133,234,142,0.08)';
+            });
+
+            treePanel.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!treePanel.contains(e.relatedTarget)) {
+                    treePanel.style.borderColor = 'var(--cyan)';
+                    treePanel.style.boxShadow =
+                        '3px 3px 0px 0px rgba(101,235,246,0.15), inset -1px -1px 0px 0px rgba(101,235,246,0.04)';
+                }
+            });
+
+            treePanel.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                treePanel.style.borderColor = 'var(--cyan)';
+                treePanel.style.boxShadow =
+                    '3px 3px 0px 0px rgba(101,235,246,0.15), inset -1px -1px 0px 0px rgba(101,235,246,0.04)';
+
+                const items = e.dataTransfer.items;
+                if (!items || items.length === 0) return;
+
+                // 尝试作为目录句柄处理（File System Access API的拖拽）
+                for (const item of items) {
+                    if (item.kind === 'file') {
+                        // 检查是否支持getAsFileSystemHandle
+                        if (typeof item.getAsFileSystemHandle === 'function') {
+                            try {
+                                const handle = await item.getAsFileSystemHandle();
+                                if (handle && handle.kind === 'directory') {
+                                    await loadFolderFSA(handle);
+                                    return;
+                                }
+                            } catch (err) {
+                                console.warn('getAsFileSystemHandle失败:', err);
+                            }
+                        }
+                        // 回退：使用webkitGetAsEntry
+                        if (typeof item.webkitGetAsEntry === 'function') {
+                            const entry = item.webkitGetAsEntry();
+                            if (entry && entry.isDirectory) {
+                                const allFiles = await readDirectoryViaEntry(entry, '');
+                                if (allFiles.length > 0) {
+                                    // 给这些文件添加webkitRelativePath
+                                    const fakeFiles = allFiles.map(f => {
+                                        const fakeFile = new File([f.file], f.path, { type: f.file
+                                                .type });
+                                        Object.defineProperty(fakeFile, 'webkitRelativePath', {
+                                            value: f.path,
+                                            writable: false,
+                                            configurable: true,
+                                        });
+                                        return fakeFile;
+                                    });
+                                    loadFolderFromInput(fakeFiles);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 如果上述都失败，尝试处理拖拽的普通文件列表
+                const files = e.dataTransfer.files;
+                if (files && files.length > 0 && files[0].webkitRelativePath) {
+                    loadFolderFromInput(files);
+                } else if (files && files.length > 0) {
+                    // 拖拽了多个文件但没有webkitRelativePath，构建虚拟文件夹
+                    const fakeFiles = Array.from(files).map(f => {
+                        const fakeFile = new File([f], f.name, { type: f.type });
+                        Object.defineProperty(fakeFile, 'webkitRelativePath', {
+                            value: '拖拽文件/' + f.name,
+                            writable: false,
+                            configurable: true,
+                        });
+                        return fakeFile;
+                    });
+                    loadFolderFromInput(fakeFiles);
+                }
+            });
+
+            // 通过webkitGetAsEntry递归读取目录
+            async function readDirectoryViaEntry(entry, parentPath) {
+                const result = [];
+                if (entry.isFile) {
+                    const file = await new Promise((resolve, reject) => {
+                        entry.file(resolve, reject);
+                    });
+                    const path = parentPath ? parentPath + '/' + entry.name : entry.name;
+                    result.push({ file, path });
+                } else if (entry.isDirectory) {
+                    const dirPath = parentPath ? parentPath + '/' + entry.name : entry.name;
+                    const reader = entry.createReader();
+                    const entries = await new Promise((resolve) => {
+                        const allEntries = [];
+                        const readBatch = () => {
+                            reader.readEntries((batch) => {
+                                if (batch.length === 0) {
+                                    resolve(allEntries);
+                                } else {
+                                    allEntries.push(...batch);
+                                    readBatch();
+                                }
+                            }, () => resolve(allEntries));
+                        };
+                        readBatch();
+                    });
+                    for (const childEntry of entries) {
+                        const childResults = await readDirectoryViaEntry(childEntry, dirPath);
+                        result.push(...childResults);
+                    }
+                }
+                return result;
+            }
+
+            // 也允许在整个body上拖拽文件夹
+            document.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                if (e.dataTransfer.types && e.dataTransfer.types.includes('Files')) {
+                    treePanel.style.borderColor = 'var(--green)';
+                    treePanel.style.boxShadow =
+                        '3px 3px 0px 0px rgba(133,234,142,0.35), inset 0px 0px 30px 0px rgba(133,234,142,0.08)';
+                }
+            });
+            document.addEventListener('dragleave', (e) => {
+                if (!e.relatedTarget || e.relatedTarget === document.documentElement) {
+                    treePanel.style.borderColor = 'var(--cyan)';
+                    treePanel.style.boxShadow =
+                        '3px 3px 0px 0px rgba(101,235,246,0.15), inset -1px -1px 0px 0px rgba(101,235,246,0.04)';
+                }
+            });
+            document.addEventListener('drop', (e) => {
+                if (!treePanel.contains(e.target) && !treeScroll.contains(e.target)) {
+                    treePanel.style.borderColor = 'var(--cyan)';
+                    treePanel.style.boxShadow =
+                        '3px 3px 0px 0px rgba(101,235,246,0.15), inset -1px -1px 0px 0px rgba(101,235,246,0.04)';
+                }
+            });
+
+            // ============ 键盘快捷键 ============
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    activeFilePath = null;
+                    updateTreeHighlight();
+                    showPlaceholder();
+                    statusDoc.classList.remove('active', 'warning');
+                }
+                if (e.key === 'Delete' && activeFilePath && document.activeElement === document.body) {
+                    fileContentCache.delete(activeFilePath);
+                    activeFilePath = null;
+                    updateTreeHighlight();
+                    showPlaceholder();
+                    statusDoc.classList.remove('active', 'warning');
+                }
+            });
+
+            // ============ 粘贴文件支持 ============
+            document.addEventListener('paste', (e) => {
+                const clipboardData = e.clipboardData;
+                if (!clipboardData) return;
+                const items = clipboardData.items;
+                if (!items) return;
+                const files = [];
+                for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    if (item.kind === 'file') {
+                        const file = item.getAsFile();
+                        if (file) files.push(file);
+                    }
+                }
+                if (files.length > 0) {
+                    e.preventDefault();
+                    const fakeFiles = files.map(f => {
+                        const fakeFile = new File([f], f.name, { type: f.type });
+                        Object.defineProperty(fakeFile, 'webkitRelativePath', {
+                            value: '粘贴文件/' + f.name,
+                            writable: false,
+                            configurable: true,
+                        });
+                        return fakeFile;
+                    });
+                    loadFolderFromInput(fakeFiles);
+                }
+            });
+
+            // ============ 初始状态 ============
+            refreshTree();
+            showPlaceholder();
+            statusDoc.classList.remove('active', 'warning');
+            statusSys.classList.add('active');
+            rootNameDisplay.textContent = '—';
+            pathIndicator.textContent = '/empty/—';
+
+            console.log('%c■ CYBER READER v2 像素文档阅读器已就绪 %c■',
+                'color:#65ebf6;font-family:monospace;font-size:1em;',
+                'color:#85ea8e;font-family:monospace;');
+            console.log('%c支持格式: TXT | DOCX(含格式) | PDF %c点击[打开文件夹]或拖拽文件夹',
+                'color:#ffffff;font-family:monospace;',
+                'color:#e08282;font-family:monospace;');
+            console.log('%cDOCX格式: 加粗·斜体·标题·列表·表格·字号 %c均保留渲染',
+                'color:#65ebf6;font-family:monospace;',
+                'color:#ffffff;font-family:monospace;');
+        })();
+    </script>
+</body>
+</html>
